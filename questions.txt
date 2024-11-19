@@ -1,0 +1,10 @@
+What is the capital of Germany?|Berlin
+What is 3 * 3?|9
+Who painted the Mona Lisa?|Leonardo da Vinci
+What is the largest planet in our solar system?|Jupiter
+Who is the author of "1984"?|George Orwell
+What is the chemical symbol for water?|H2O
+What year did World War II end?|1945
+What is the square root of 64?|8
+What is the national animal of Canada?|Beaver
+What is the main ingredient in guacamole?|Avocado
