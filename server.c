@@ -21,7 +21,8 @@ Trivia trivia[] = {{"What is the capital of France?", "Paris"},
 int trivia_count = 3; // Number of trivia questions
 
 // Function to handle communication with a single client
-void* handle_client(int client_socket, char *client_ip) {
+void *handle_client(void* client_socket_ptr) {
+  int client_socket = *((int*)client_socket_ptr);
   char buffer[BUFFER_SIZE]; // Buffer for communication
   int score = 0;            // Client's score
 
@@ -35,12 +36,14 @@ void* handle_client(int client_socket, char *client_ip) {
     // Receive the client's answer
     memset(buffer, 0, BUFFER_SIZE);
     int bytes_received = recv(client_socket, buffer, BUFFER_SIZE - 1, 0);
+    
     if (bytes_received <= 0) {
-      printf("Client @ %s disconnected or error occurred.\n", client_ip);
+      printf("Client disconnected or error occurred.\n");
       break;
     }
+
     buffer[bytes_received] = '\0'; // Null-terminate the received data
-    printf("Received from client @ %s: '%s'\n", client_ip, buffer);
+    printf("Received from client: '%s'\n", buffer);
 
     // Remove trailing newline if present
     buffer[strcspn(buffer, "\n")] = 0;
@@ -62,7 +65,7 @@ void* handle_client(int client_socket, char *client_ip) {
   send(client_socket, buffer, strlen(buffer), 0);
 
   close(client_socket); // Close the connection with the client
-
+  free(client_socket_ptr);
   return NULL;
 }
 
@@ -100,21 +103,29 @@ int main() {
     // Accept a client connection
     client_socket =
         accept(server_socket, (struct sockaddr *)&client_addr, &addr_len);
+
     if (client_socket < 0) {
       perror("Accept failed");
       continue;
     }
 
     pthread_t thread_id;
-    int *client_socket_ptr = malloc(sizeof(int));
-    client_socket_ptr = &client_socket;
+    int* new_client_socket = malloc(sizeof(int));
+    *new_client_socket = client_socket;
+
     // Convert the client's IP address to a human-readable format
     inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
     printf("Client connected: %s\n", client_ip);
 
     // Handle the client in a thread
-    pthread_create(&thread_id, NULL, handle_client(*client_socket_ptr, client_ip), client_socket_ptr);
-    pthread_detach(thread_id);
+    if (pthread_create(&thread_id, NULL,
+                       handle_client,
+                       new_client_socket) != 0) {
+      perror("Thread creation failed");
+      close(client_socket);
+    } else {
+      pthread_detach(thread_id);
+    }
 
     printf("Client disconnected: %s\n", client_ip);
   }
