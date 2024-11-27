@@ -14,11 +14,62 @@ typedef struct {
   char answer[BUFFER_SIZE];
 } Trivia;
 
+typedef struct{
+  char ip[100];
+  int score;
+}leaderScores;
+
 // Sample trivia questions
 Trivia trivia[] = {{"What is the capital of France?", "Paris"},
                    {"What is 5 + 7?", "12"},
                    {"Who wrote 'Romeo and Juliet'?", "Shakespeare"}};
 int trivia_count = 3; // Number of trivia questions
+
+int compare(const void* a, const void*b){
+  leaderScores* entryA= (leaderScores*)a;
+  leaderScores* entryA= (leaderScores*)a;
+  return entryB->score - entryA->score; //descending order
+}
+
+void saveScore(const char* client_ip, int score){
+  FILE *file = fopen("leaderboard.txt", "a");
+  if (file==NULL){
+    perror("Cannot open the leaderboard");
+    return;
+  }
+  fprintf(file, "%s|%d\n", client_ip, score);
+  fclose(file);
+}
+
+void loadScore(){
+  FILE *file = fopen("leaderboard.txt", "r");
+  if (file==NULL){
+    perror("Cannot open the leaderboard");
+    return;
+  }
+  leaderScores leaderboard[100];
+  int count=0;
+
+  //read and populate array
+  while (fscanf(file, "%[^|]|%d\n", leaderboard[count].ip, &leaderboard[count].score) != EOF) {
+    count++;
+  }
+  fclose(file);
+  
+  //sorts leaderboard in descending order
+  qsort(leaderboard, count, sizeof(leaderScore), compare);
+
+  //shows sorted leaderboard
+  printf("Updated leaderboard:\n");
+  for (int i=0, i<5, i++){
+    if (i<count){
+      print("%d. %s: %d\n", i + 1, leaderboard[i].ip, leaderboard[i].score);
+    }else{
+      //placeholder for empty positions
+      printf("%d. [empty]\n", i + 1);
+    }
+  }
+}
 
 // Function to handle communication with a single client
 void *handle_client(void* client_socket_ptr) {
@@ -26,6 +77,8 @@ void *handle_client(void* client_socket_ptr) {
   char buffer[BUFFER_SIZE]; // Buffer for communication
   int score = 0;            // Client's score
 
+  loadscore();
+  
   for (int i = 0; i < trivia_count; i++) {
     // Send the current question to the client
     send(client_socket, trivia[i].question, strlen(trivia[i].question), 0);
@@ -63,10 +116,10 @@ void *handle_client(void* client_socket_ptr) {
   // Send the final score to the client
   sprintf(buffer, "Your final score is: %d\n", score);
   send(client_socket, buffer, strlen(buffer), 0);
-
   close(client_socket); // Close the connection with the client
-  free(client_socket_ptr);
-  return NULL;
+
+  savescore(client_ip, score);
+  loadscore();
 }
 
 int main() {
