@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,14 +16,32 @@ typedef struct {
 } Trivia;
 
 // Sample trivia questions
-Trivia trivia[] = {{"What is the capital of France?", "Paris"},
-                   {"What is 5 + 7?", "12"},
-                   {"Who wrote 'Romeo and Juliet'?", "Shakespeare"}};
-int trivia_count = 3; // Number of trivia questions
+Trivia trivia[50];
+int trivia_count = 0; // Number of trivia questions
+
+// loads trivia questions from file
+void load_trivia() {
+  FILE *fptr;
+  trivia_count = 0;
+  int bufferLen = 256; // read 
+
+  fptr = fopen("questions.txt", "r");
+
+  assert(fptr != NULL); // if cannot open file, program should end
+
+  char buffer[bufferLen];
+  while (fgets(buffer, bufferLen, fptr)) {
+    char *question = strtok(buffer, "|"); // read token until |
+    char *answer = strtok(NULL, "|"); // continue reading for answer
+    strncpy(trivia[trivia_count].question, question, strlen(question));
+    strncpy(trivia[trivia_count].answer, answer, strlen(answer) - 1); // ignore new line char
+    trivia_count++;
+  }
+}
 
 // Function to handle communication with a single client
-void *handle_client(void* client_socket_ptr) {
-  int client_socket = *((int*)client_socket_ptr);
+void *handle_client(void *client_socket_ptr) {
+  int client_socket = *((int *)client_socket_ptr);
   char buffer[BUFFER_SIZE]; // Buffer for communication
   int score = 0;            // Client's score
 
@@ -36,7 +55,7 @@ void *handle_client(void* client_socket_ptr) {
     // Receive the client's answer
     memset(buffer, 0, BUFFER_SIZE);
     int bytes_received = recv(client_socket, buffer, BUFFER_SIZE - 1, 0);
-    
+
     if (bytes_received <= 0) {
       printf("Client disconnected or error occurred.\n");
       break;
@@ -70,6 +89,9 @@ void *handle_client(void* client_socket_ptr) {
 }
 
 int main() {
+
+  load_trivia();
+
   int server_socket, client_socket;            // Socket descriptors
   struct sockaddr_in server_addr, client_addr; // Address structures
   socklen_t addr_len = sizeof(client_addr);
@@ -110,7 +132,7 @@ int main() {
     }
 
     pthread_t thread_id;
-    int* new_client_socket = malloc(sizeof(int));
+    int *new_client_socket = malloc(sizeof(int));
     *new_client_socket = client_socket;
 
     // Convert the client's IP address to a human-readable format
@@ -118,9 +140,8 @@ int main() {
     printf("Client connected: %s\n", client_ip);
 
     // Handle the client in a thread
-    if (pthread_create(&thread_id, NULL,
-                       handle_client,
-                       new_client_socket) != 0) {
+    if (pthread_create(&thread_id, NULL, handle_client, new_client_socket) !=
+        0) {
       perror("Thread creation failed");
       close(client_socket);
     } else {
