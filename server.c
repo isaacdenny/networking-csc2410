@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <assert.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,22 +9,36 @@
 
 #define PORT 8080        // Port the server listens on
 #define BUFFER_SIZE 1024 // Buffer size for communication
+#define MAX_ENTRIES 100
+#define MAX_TOP_SCORES 5
 
-// Define the structure for trivia questions
+typedef struct {
+  char ip[100];
+  int score;
+} Score;
+
 typedef struct {
   char question[BUFFER_SIZE];
   char answer[BUFFER_SIZE];
 } Trivia;
 
-// Sample trivia questions
+typedef struct {
+  int *client_socket;
+  char ip[INET_ADDRSTRLEN];
+} ThreadArgs;
+
 Trivia trivia[50];
-int trivia_count = 0; // Number of trivia questions
+int trivia_count = 0;
+
+Score leaderboard[MAX_ENTRIES];
+char lb_buffer[1024]; // 12 chars per line * 50 lines < 1024
+int score_count = 0;
 
 // loads trivia questions from file
 void load_trivia() {
   FILE *fptr;
   trivia_count = 0;
-  int bufferLen = 256; // read 
+  int bufferLen = 256; // read
 
   fptr = fopen("questions.txt", "r");
 
@@ -32,29 +47,99 @@ void load_trivia() {
   char buffer[bufferLen];
   while (fgets(buffer, bufferLen, fptr)) {
     char *question = strtok(buffer, "|"); // read token until |
-    char *answer = strtok(NULL, "|"); // continue reading for answer
+    char *answer = strtok(NULL, "|");     // continue reading for answer
     strncpy(trivia[trivia_count].question, question, strlen(question));
-    strncpy(trivia[trivia_count].answer, answer, strlen(answer) - 1); // ignore new line char
+    strncpy(trivia[trivia_count].answer, answer,
+            strlen(answer) - 1); // ignore new line char
     trivia_count++;
   }
 }
 
-// Function to handle communication with a single client
-void *handle_client(void *client_socket_ptr) {
-  int client_socket = *((int *)client_socket_ptr);
-  char buffer[BUFFER_SIZE]; // Buffer for communication
-  int score = 0;            // Client's score
+int compare(const void *a, const void *b) {
+  Score *entryA = (Score *)a;
+  Score *entryB = (Score *)b;
+  return entryB->score - entryA->score; // descending order
+}
+
+void load_scores() {
+  FILE *file = fopen("leaderboard.txt", "a+");
+  if (file == NULL) {
+    perror("Error opening file");
+    return;
+  }
+
+  score_count = 0;
+  // read and populate array
+  while (score_count < MAX_ENTRIES &&
+         fscanf(file, "%[^|]|%d\n", leaderboard[score_count].ip,
+                &leaderboard[score_count].score) != EOF) {
+    score_count++;
+  }
+  fclose(file);
+
+  // sorts leaderboard in descending order
+  qsort(leaderboard, score_count, sizeof(Score), compare);
+
+  int offset = 0;
+  int buffer_size = sizeof(lb_buffer);
+
+  offset += snprintf(lb_buffer, buffer_size, "%s\n", "IP|Score");
+
+  // Format the leaderboard into a string for sending to client
+  for (int i = 0; i < score_count && i < MAX_TOP_SCORES; i++) {
+    offset += snprintf(lb_buffer + offset, buffer_size - offset, "%s|%d\n",
+                       leaderboard[i].ip, leaderboard[i].score);
+    if (offset >= sizeof(lb_buffer)) {
+      break; // Prevent overflow
+    }
+  }
+
+  printf("%s", lb_buffer);
+}
+
+void save_score(const char *client_ip, int score) {
+  assert(score_count < MAX_ENTRIES);
+
+  strncpy(leaderboard[score_count].ip, client_ip, INET_ADDRSTRLEN);
+  leaderboard[score_count].score = score;
+  score_count++;
+
+  FILE *file = fopen("leaderboard.txt", "a");
+  if (file == NULL) {
+    perror("Cannot open the leaderboard");
+    return;
+  }
+
+  fprintf(file, "%s|%d\n", client_ip, score);
+
+  fclose(file);
+  load_scores();
+}
+
+// handle communication with a single client
+void *handle_client(void *args) {
+  ThreadArgs *targs = (ThreadArgs *)args;
+
+  assert(targs != NULL);
+  assert(*targs->client_socket > 0);
+
+  char buffer[BUFFER_SIZE];
+  int score = 0;
+
+  // send the leaderboard
+  send(*targs->client_socket, lb_buffer, strlen(lb_buffer), 0);
+  usleep(100000);
 
   for (int i = 0; i < trivia_count; i++) {
-    // Send the current question to the client
-    send(client_socket, trivia[i].question, strlen(trivia[i].question), 0);
+    send(*targs->client_socket, trivia[i].question, strlen(trivia[i].question),
+         0);
 
     // Allow time for the client to process the question
-    usleep(100000); // 100ms delay
+    usleep(100000);
 
-    // Receive the client's answer
     memset(buffer, 0, BUFFER_SIZE);
-    int bytes_received = recv(client_socket, buffer, BUFFER_SIZE - 1, 0);
+    int bytes_received =
+        recv(*targs->client_socket, buffer, BUFFER_SIZE - 1, 0);
 
     if (bytes_received <= 0) {
       printf("Client disconnected or error occurred.\n");
@@ -67,12 +152,11 @@ void *handle_client(void *client_socket_ptr) {
     // Remove trailing newline if present
     buffer[strcspn(buffer, "\n")] = 0;
 
-    // Check the client's answer and send feedback
     if (strcmp(buffer, trivia[i].answer) == 0) {
       score++;
-      send(client_socket, "Correct!\n", 9, 0);
+      send(*targs->client_socket, "Correct!\n", 9, 0);
     } else {
-      send(client_socket, "Wrong!\n", 7, 0);
+      send(*targs->client_socket, "Wrong!\n", 7, 0);
     }
 
     // Allow time for the client to process the feedback
@@ -81,16 +165,18 @@ void *handle_client(void *client_socket_ptr) {
 
   // Send the final score to the client
   sprintf(buffer, "Your final score is: %d\n", score);
-  send(client_socket, buffer, strlen(buffer), 0);
+  send(*targs->client_socket, buffer, strlen(buffer), 0);
 
-  close(client_socket); // Close the connection with the client
-  free(client_socket_ptr);
+  close(*targs->client_socket);
+  save_score(targs->ip, score);
+
   return NULL;
 }
 
 int main() {
 
   load_trivia();
+  load_scores();
 
   int server_socket, client_socket;            // Socket descriptors
   struct sockaddr_in server_addr, client_addr; // Address structures
@@ -132,17 +218,19 @@ int main() {
     }
 
     pthread_t thread_id;
-    int *new_client_socket = malloc(sizeof(int));
-    *new_client_socket = client_socket;
 
     // Convert the client's IP address to a human-readable format
     inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
     printf("Client connected: %s\n", client_ip);
 
+    ThreadArgs *args = malloc(sizeof(ThreadArgs));
+    args->client_socket = &client_socket;
+    strncpy(args->ip, client_ip, INET_ADDRSTRLEN);
+
     // Handle the client in a thread
-    if (pthread_create(&thread_id, NULL, handle_client, new_client_socket) !=
-        0) {
+    if (pthread_create(&thread_id, NULL, handle_client, args) != 0) {
       perror("Thread creation failed");
+      free(args);
       close(client_socket);
     } else {
       pthread_detach(thread_id);
