@@ -3,6 +3,6 @@ Project for networking in CSC2410
 
 ## Features
 
-- [ ] Multithreaded Client Handling
-- [ ] Trivia questions loaded from a file
-- [ ] Client Leaderboard
+- [x] Multithreaded Client Handling
+- [x] Trivia questions loaded from a file
+- [x] Client Leaderboard
