@@ -25,7 +25,7 @@ typedef struct {
 typedef struct {
   int *client_socket;
   char ip[INET_ADDRSTRLEN];
-} ThreadArgs;
+} client_info;
 
 Trivia trivia[50];
 int trivia_count = 0;
@@ -118,7 +118,7 @@ void save_score(const char *client_ip, int score) {
 
 // handle communication with a single client
 void *handle_client(void *args) {
-  ThreadArgs *targs = (ThreadArgs *)args;
+  client_info *targs = (client_info *)args;
 
   assert(targs != NULL);
   assert(*targs->client_socket > 0);
@@ -223,8 +223,10 @@ int main() {
     inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
     printf("Client connected: %s\n", client_ip);
 
-    ThreadArgs *args = malloc(sizeof(ThreadArgs));
-    args->client_socket = &client_socket;
+    client_info *args = malloc(sizeof(client_info));
+    int* client_socket_ptr = malloc(sizeof(int));
+    *client_socket_ptr = client_socket;
+    args->client_socket = client_socket_ptr;
     strncpy(args->ip, client_ip, INET_ADDRSTRLEN);
 
     // Handle the client in a thread
